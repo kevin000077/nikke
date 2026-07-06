@@ -1,0 +1,58 @@
+{
+  "window_title": "",
+  "physics": {
+    "ball_radius": 7.0,
+    "ball_radius_to_block_ratio": 0.215,
+    "ball_radius_to_board_width_ratio": 0.0345,
+    "max_collisions": 40,
+    "max_distance_factor": 12.0,
+    "reflection_bias_deg": 0.0,
+    "collision_epsilon": 0.05,
+    "angle_min_deg": -80.0,
+    "angle_max_deg": 80.0,
+    "coarse_step_deg": 1.0,
+    "fine_step_deg": 0.1,
+    "recommendation_count": 2,
+    "recommendation_separation_deg": 2.0,
+    "volley_count": 67
+  },
+  "vision": {
+    "water_hsv_low": [82, 70, 80],
+    "water_hsv_high": [112, 255, 255],
+    "block_hsv_low": [38, 90, 45],
+    "block_hsv_high": [82, 255, 255],
+    "min_block_area": 700,
+    "max_block_area": 9000,
+    "block_min_width": 38,
+    "block_max_width": 120,
+    "block_min_height": 28,
+    "block_max_height": 110,
+    "block_corner_radius_ratio": 0.0,
+    "detection_interval_ms": 250,
+    "aim_transition_delay_ms": 600,
+    "temporal_frames": 3
+  },
+  "overlay": {
+    "current_color": "#FF35F5",
+    "recommendation_colors": ["#50FF7A", "#FFE45B", "#FF9D42"],
+    "line_width": 3.2,
+    "opacity": 0.92,
+    "show_collision_points": true,
+    "show_locked_boxes": true,
+    "show_collision_frame": true,
+    "visible": true
+  },
+  "hotkeys": {
+    "toggle_overlay": "F7",
+    "pause": "F8",
+    "calibrate": "F9",
+    "settings": "F10"
+  },
+  "calibration": {
+    "launch_origin_normalized": [0.5, 0.94],
+    "boundary_offsets": [0.0, 0.0, 0.0, 0.0],
+    "duration_seconds": 20,
+    "min_track_points": 12,
+    "calibrated": false
+  }
+}

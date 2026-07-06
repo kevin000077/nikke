@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.egg-info/
+.venv/
+
+# Test and tool caches
+.pytest_cache/
+.pytest_tmp*/
+.coverage
+htmlcov/
+
+# Local runtime state
+/config.json
+/debug/
+*.log
+
+# Packaging output
+/build/
+/dist/
+
+# Generated recognition/video artifacts
+/*.png
+/*.mp4
+/prediction*.json
+/ocr_reference_frames.*
+/video_contact_sheet.*
+/recognition_result.*
+/corrected_aim_detection.*
+/grid_detection_19.*
+
+# Editors and OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
