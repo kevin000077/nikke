@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtGui import QCursor
-from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox, QWidget
 
 from .calibration import MotionBallTracker, fit_calibration
 from .capture import HotkeyPoller, WindowCapture, list_visible_windows
@@ -44,14 +44,14 @@ class SceneSnapshot:
     ball_radius: float
 
 
-def choose_window_title(parent: object | None = None) -> str | None:
+def choose_window_title(parent: QWidget | None = None) -> str | None:
     windows = list_visible_windows()
     if not windows:
-        QMessageBox.critical(None, "弹珠轨迹助手", "没有找到可捕获的可见窗口。")
+        QMessageBox.critical(parent, "弹珠轨迹助手", "没有找到可捕获的可见窗口。")
         return None
     titles = [title for _, title in windows]
     title, accepted = QInputDialog.getItem(
-        None,
+        parent,
         "选择游戏窗口",
         "请选择游戏所在窗口：",
         titles,
@@ -86,6 +86,7 @@ class ApplicationController(QObject):
         self.overlay.debug_view = debug_view
         self.refresh_button = RefreshButton()
         self.refresh_button.refresh_requested.connect(self.refresh_scene)
+        self.refresh_button.select_window_requested.connect(self.select_target_window)
         self.refresh_button.exit_requested.connect(self.app.quit)
         self.hotkeys = HotkeyPoller(
             [
@@ -684,6 +685,29 @@ class ApplicationController(QObject):
         self.status = "已重启识别：等待发射线并重新识别外框、方块和发射点"
         self.overlay.update_scene(None, [], None, [], self.status)
         self.overlay.hide()
+
+    def select_target_window(self) -> None:
+        """Let the user switch capture targets without restarting the process."""
+        timer_was_active = self.timer.isActive()
+        self.timer.stop()
+        try:
+            selected = choose_window_title(self.refresh_button)
+            if not selected:
+                return
+            replacement = WindowCapture(selected)
+            previous = self.capture
+            self.capture = replacement
+            previous.close()
+            self.config.window_title = selected
+            self.config.save(self.config_path)
+            self.last_client_size = None
+            self.refresh_scene()
+            self.status = f"已选择窗口：{selected}｜等待重新识别"
+        except Exception as error:
+            QMessageBox.critical(self.refresh_button, "切换窗口失败", str(error))
+        finally:
+            if timer_was_active:
+                self.timer.start()
 
     def _poll_cursor_motion(self) -> None:
         position = QCursor.pos()

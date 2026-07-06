@@ -23,6 +23,7 @@ from .geometry import Obstacle, Rect, Trajectory
 
 class RefreshButton(QWidget):
     refresh_requested = Signal()
+    select_window_requested = Signal()
     exit_requested = Signal()
 
     def __init__(self) -> None:
@@ -47,6 +48,19 @@ class RefreshButton(QWidget):
         )
         refresh_button.clicked.connect(self.refresh_requested.emit)
         layout.addWidget(refresh_button)
+
+        select_button = QPushButton("选择窗口")
+        select_button.setFixedSize(88, 34)
+        select_button.setStyleSheet(
+            "QPushButton {"
+            "background:#33305A; color:white; border:2px solid #A69CFF;"
+            "border-radius:7px; font-weight:bold;"
+            "}"
+            "QPushButton:hover { background:#4A467C; }"
+            "QPushButton:pressed { background:#24213F; }"
+        )
+        select_button.clicked.connect(self.select_window_requested.emit)
+        layout.addWidget(select_button)
 
         exit_button = QPushButton("退出助手")
         exit_button.setFixedSize(82, 34)
