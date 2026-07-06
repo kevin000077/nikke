@@ -68,6 +68,7 @@ class HotkeyConfig:
 class CalibrationConfig:
     launch_origin_normalized: list[float] = field(default_factory=lambda: [0.5, 0.94])
     boundary_offsets: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0, 0.0])
+    manual_board_normalized: list[float] | None = None
     duration_seconds: int = 20
     min_track_points: int = 12
     calibrated: bool = False

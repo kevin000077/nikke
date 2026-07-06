@@ -23,6 +23,7 @@ from .geometry import Obstacle, Rect, Trajectory
 
 class RefreshButton(QWidget):
     refresh_requested = Signal()
+    manual_frame_requested = Signal()
     select_window_requested = Signal()
     exit_requested = Signal()
 
@@ -48,6 +49,19 @@ class RefreshButton(QWidget):
         )
         refresh_button.clicked.connect(self.refresh_requested.emit)
         layout.addWidget(refresh_button)
+
+        frame_button = QPushButton("设置白框")
+        frame_button.setFixedSize(88, 34)
+        frame_button.setStyleSheet(
+            "QPushButton {"
+            "background:#24442E; color:white; border:2px solid #63E68A;"
+            "border-radius:7px; font-weight:bold;"
+            "}"
+            "QPushButton:hover { background:#356443; }"
+            "QPushButton:pressed { background:#183020; }"
+        )
+        frame_button.clicked.connect(self.manual_frame_requested.emit)
+        layout.addWidget(frame_button)
 
         select_button = QPushButton("选择窗口")
         select_button.setFixedSize(88, 34)
@@ -75,6 +89,118 @@ class RefreshButton(QWidget):
         exit_button.clicked.connect(self.exit_requested.emit)
         layout.addWidget(exit_button)
         self.adjustSize()
+
+
+class ManualFrameSelector(QWidget):
+    frame_selected = Signal(float, float, float, float)
+    cancelled = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.values: list[float] = []
+        self.cursor_position = QPointF()
+        self.message = ""
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+
+    def begin(self) -> None:
+        self.values.clear()
+        self.cursor_position = QPointF(self.width() / 2, self.height() / 2)
+        self.message = ""
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
+        self.update()
+
+    def _instruction(self) -> str:
+        labels = ("左边竖线", "右边竖线", "上边横线", "下边横线")
+        if len(self.values) >= len(labels):
+            return "白框设置完成"
+        return f"第 {len(self.values) + 1}/4 步：点击确定{labels[len(self.values)]}"
+
+    def mouseMoveEvent(self, event: object) -> None:
+        self.cursor_position = event.position()
+        self.update()
+
+    def mousePressEvent(self, event: object) -> None:
+        if event.button() == Qt.MouseButton.RightButton:
+            self.cancelled.emit()
+            return
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        position = event.position()
+        value = float(position.x() if len(self.values) < 2 else position.y())
+        self.values.append(value)
+        if len(self.values) < 4:
+            self.update()
+            return
+        left, right = sorted(self.values[:2])
+        top, bottom = sorted(self.values[2:])
+        if (
+            right - left < self.width() * 0.20
+            or bottom - top < self.height() * 0.30
+        ):
+            self.values.clear()
+            self.message = "选择范围太小，请从左边竖线重新开始"
+            self.update()
+            return
+        self.frame_selected.emit(
+            left / max(1.0, self.width()),
+            top / max(1.0, self.height()),
+            right / max(1.0, self.width()),
+            bottom / max(1.0, self.height()),
+        )
+
+    def keyPressEvent(self, event: object) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self.cancelled.emit()
+            return
+        super().keyPressEvent(event)
+
+    def paintEvent(self, event: object) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 38))
+        line_pen = QPen(QColor("#63FF9A"), 2.0, Qt.PenStyle.DashLine)
+        painter.setPen(line_pen)
+        if len(self.values) >= 1:
+            painter.drawLine(
+                QPointF(self.values[0], 0),
+                QPointF(self.values[0], self.height()),
+            )
+        if len(self.values) >= 2:
+            painter.drawLine(
+                QPointF(self.values[1], 0),
+                QPointF(self.values[1], self.height()),
+            )
+        if len(self.values) >= 3:
+            painter.drawLine(
+                QPointF(0, self.values[2]),
+                QPointF(self.width(), self.values[2]),
+            )
+        if len(self.values) < 2:
+            x = self.cursor_position.x()
+            painter.drawLine(QPointF(x, 0), QPointF(x, self.height()))
+        elif len(self.values) < 4:
+            y = self.cursor_position.y()
+            painter.drawLine(QPointF(0, y), QPointF(self.width(), y))
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(15, 25, 34, 220))
+        painter.drawRoundedRect(16, 16, 430, 72, 8, 8)
+        painter.setPen(QColor("#FFFFFF"))
+        painter.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        painter.drawText(30, 44, self._instruction())
+        painter.setFont(QFont("Segoe UI", 9))
+        painter.drawText(30, 68, self.message or "右键或 Esc 取消")
 
 
 class OverlayWindow(QWidget):

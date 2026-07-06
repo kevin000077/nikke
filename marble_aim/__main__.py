@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 import sys
+import traceback
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -38,16 +39,21 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     config_path = args.config or default_config_path()
+    print("[MarbleAim] Starting...", flush=True)
+    print(f"[MarbleAim] Config: {config_path}", flush=True)
     # Qt 6 configures PER_MONITOR_AWARE_V2 itself. Calling the legacy Windows
     # DPI API first only makes Qt's second request fail with ACCESS_DENIED.
     app = QApplication(sys.argv[:1])
     app.setApplicationName("弹珠轨迹助手")
+    app.setQuitOnLastWindowClosed(False)
     config = AppConfig.load(config_path)
     if args.window_title:
         config.window_title = args.window_title
     if not config.window_title or find_window(config.window_title) is None:
+        print("[MarbleAim] Target window is not available; opening selector.", flush=True)
         selected = choose_window_title()
         if not selected:
+            print("[MarbleAim] No target window selected. Exiting.", flush=True)
             return 1
         config.window_title = selected
     config.save(config_path)
@@ -61,8 +67,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         controller.start()
     except Exception as error:
+        traceback.print_exc()
         QMessageBox.critical(None, "启动失败", str(error))
         return 2
+    print(f"[MarbleAim] Running on window: {config.window_title}", flush=True)
     app._marble_controller = controller  # type: ignore[attr-defined]
     return app.exec()
 

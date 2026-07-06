@@ -51,6 +51,7 @@
   "calibration": {
     "launch_origin_normalized": [0.5, 0.94],
     "boundary_offsets": [0.0, 0.0, 0.0, 0.0],
+    "manual_board_normalized": null,
     "duration_seconds": 20,
     "min_track_points": 12,
     "calibrated": false

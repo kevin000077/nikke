@@ -128,6 +128,26 @@ def test_single_pixel_inner_vertical_edges_define_collision_frame():
     assert abs(result.board.right - 650) <= 1
 
 
+def test_manual_board_skips_automatic_collision_frame_detection():
+    image = np.full((600, 900, 3), hsv_to_bgr(100, 210, 235), dtype=np.uint8)
+    green = hsv_to_bgr(55, 220, 210)
+    cv2.rectangle(image, (260, 180), (319, 239), green, -1)
+    manual = [250 / 900, 100 / 600, 650 / 900, 500 / 600]
+
+    result = BoardDetector(
+        VisionConfig(),
+        manual_board_normalized=manual,
+    ).detect(image)
+
+    assert result.collision_frame_detected
+    assert result.board is not None
+    assert abs(result.board.left - 250) <= 1
+    assert abs(result.board.top - 100) <= 1
+    assert abs(result.board.right - 650) <= 1
+    assert abs(result.board.bottom - 500) <= 1
+    assert len(result.obstacles) == 1
+
+
 def test_aim_reticle_radius_scales_from_visible_circle():
     image = np.full((600, 900, 3), hsv_to_bgr(100, 210, 235), dtype=np.uint8)
     board = Rect(250.0, 100.0, 650.0, 500.0)

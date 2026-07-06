@@ -9,7 +9,7 @@ import time
 
 import cv2
 import numpy as np
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, Qt, QTimer
 from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import QApplication, QInputDialog, QMessageBox, QWidget
 
@@ -26,7 +26,12 @@ from .geometry import (
     unit,
     vec,
 )
-from .overlay import OverlayWindow, RefreshButton, SettingsDialog
+from .overlay import (
+    ManualFrameSelector,
+    OverlayWindow,
+    RefreshButton,
+    SettingsDialog,
+)
 from .vision import (
     BoardDetector,
     DetectionResult,
@@ -46,19 +51,29 @@ class SceneSnapshot:
 
 def choose_window_title(parent: QWidget | None = None) -> str | None:
     windows = list_visible_windows()
+    print(f"[MarbleAim] Found {len(windows)} visible windows.", flush=True)
     if not windows:
         QMessageBox.critical(parent, "弹珠轨迹助手", "没有找到可捕获的可见窗口。")
         return None
     titles = [title for _, title in windows]
-    title, accepted = QInputDialog.getItem(
-        parent,
-        "选择游戏窗口",
-        "请选择游戏所在窗口：",
-        titles,
-        0,
-        False,
-    )
-    return str(title) if accepted and title else None
+    dialog = QInputDialog(parent)
+    dialog.setWindowTitle("选择游戏窗口")
+    dialog.setLabelText("请选择游戏所在窗口：")
+    dialog.setComboBoxItems(titles)
+    dialog.setComboBoxEditable(False)
+    dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+    dialog.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+    dialog.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, True)
+    dialog.show()
+    dialog.raise_()
+    dialog.activateWindow()
+    accepted = bool(dialog.exec())
+    title = dialog.textValue()
+    if accepted and title:
+        print(f"[MarbleAim] Selected window: {title}", flush=True)
+        return str(title)
+    print("[MarbleAim] Window selection cancelled.", flush=True)
+    return None
 
 
 class ApplicationController(QObject):
@@ -79,15 +94,30 @@ class ApplicationController(QObject):
         self.start_calibration_requested = start_calibration
         self.capture = WindowCapture(config.window_title)
         self.detector = TemporalDetector(
-            BoardDetector(config.vision), config.vision.temporal_frames
+            BoardDetector(
+                config.vision,
+                config.calibration.manual_board_normalized,
+            ),
+            config.vision.temporal_frames,
         )
         self.motion_aim_detector = MotionAimDetector()
         self.overlay = OverlayWindow(config)
         self.overlay.debug_view = debug_view
         self.refresh_button = RefreshButton()
         self.refresh_button.refresh_requested.connect(self.refresh_scene)
+        self.refresh_button.manual_frame_requested.connect(
+            self.start_manual_frame_selection
+        )
         self.refresh_button.select_window_requested.connect(self.select_target_window)
         self.refresh_button.exit_requested.connect(self.app.quit)
+        self.manual_frame_selector = ManualFrameSelector()
+        self.manual_frame_selector.frame_selected.connect(
+            self.accept_manual_frame
+        )
+        self.manual_frame_selector.cancelled.connect(
+            self.cancel_manual_frame_selection
+        )
+        self.manual_selector_timer_was_active = False
         self.hotkeys = HotkeyPoller(
             [
                 config.hotkeys.toggle_overlay,
@@ -163,6 +193,7 @@ class ApplicationController(QObject):
         self.timer.stop()
         self.executor.shutdown(wait=False, cancel_futures=True)
         self.capture.close()
+        self.manual_frame_selector.close()
         self.refresh_button.close()
         self.config.save(self.config_path)
 
@@ -642,7 +673,14 @@ class ApplicationController(QObject):
                 action()
 
     def refresh_scene(self) -> None:
-        """Restart recognition manually without changing automatic round relocking."""
+        """Clear every override and restart fully automatic recognition."""
+        self.config.calibration.manual_board_normalized = None
+        self.config.save(self.config_path)
+        self._reset_recognition_state(
+            "已重启识别：等待发射线并重新识别外框、方块和发射点"
+        )
+
+    def _reset_recognition_state(self, status: str) -> None:
         self.scene_locked = False
         self.latest_scene = None
         self.latest_detection = None
@@ -676,15 +714,57 @@ class ApplicationController(QObject):
         self.aim_missing_since = None
         self.aim_reappeared_since = None
         self.detector = TemporalDetector(
-            BoardDetector(self.config.vision),
+            BoardDetector(
+                self.config.vision,
+                self.config.calibration.manual_board_normalized,
+            ),
             self.config.vision.temporal_frames,
         )
         self.motion_aim_detector = MotionAimDetector()
         self.tracker.reset()
         self.last_detection_at = 0.0
-        self.status = "已重启识别：等待发射线并重新识别外框、方块和发射点"
+        self.status = status
         self.overlay.update_scene(None, [], None, [], self.status)
         self.overlay.hide()
+
+    def start_manual_frame_selection(self) -> None:
+        """Collect left, right, top and bottom lines directly from the user."""
+        self.manual_selector_timer_was_active = self.timer.isActive()
+        self.timer.stop()
+        self.overlay.hide()
+        self.refresh_button.hide()
+        self.manual_frame_selector.setGeometry(self.overlay.geometry())
+        self.manual_frame_selector.begin()
+
+    def accept_manual_frame(
+        self,
+        left: float,
+        top: float,
+        right: float,
+        bottom: float,
+    ) -> None:
+        self.manual_frame_selector.hide()
+        self.config.calibration.manual_board_normalized = [
+            left,
+            top,
+            right,
+            bottom,
+        ]
+        self.config.save(self.config_path)
+        self._reset_recognition_state(
+            "手动白框已锁定：后续识别将跳过自动白框检测"
+        )
+        self.refresh_button.show()
+        if self.manual_selector_timer_was_active:
+            self.timer.start()
+
+    def cancel_manual_frame_selection(self) -> None:
+        self.manual_frame_selector.hide()
+        self.refresh_button.show()
+        if self.config.overlay.visible:
+            self.overlay.show()
+        if self.manual_selector_timer_was_active:
+            self.timer.start()
 
     def select_target_window(self) -> None:
         """Let the user switch capture targets without restarting the process."""

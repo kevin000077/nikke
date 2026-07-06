@@ -707,9 +707,32 @@ def _detect_arrow_axis(
 
 
 class BoardDetector:
-    def __init__(self, config: VisionConfig):
+    def __init__(
+        self,
+        config: VisionConfig,
+        manual_board_normalized: list[float] | None = None,
+    ):
         self.config = config
+        self.manual_board_normalized = manual_board_normalized
         self.aim_radius_ratios: deque[float] = deque(maxlen=5)
+
+    def _manual_board(self, image: Image) -> Rect | None:
+        values = self.manual_board_normalized
+        if values is None or len(values) != 4:
+            return None
+        height, width = image.shape[:2]
+        left, top, right, bottom = (
+            float(np.clip(value, 0.0, 1.0)) for value in values
+        )
+        rect = Rect(
+            left * width,
+            top * height,
+            right * width,
+            bottom * height,
+        )
+        if rect.width < width * 0.15 or rect.height < height * 0.25:
+            return None
+        return rect
 
     def detect_aim_only(
         self,
@@ -733,7 +756,17 @@ class BoardDetector:
 
     def detect(self, bgr: Image, *, debug_masks: bool = False) -> DetectionResult:
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-        collision_board, collision_confidence, pale_mask = _detect_collision_frame(hsv)
+        manual_board = self._manual_board(bgr)
+        if manual_board is not None:
+            collision_board = manual_board
+            collision_confidence = 1.0
+            pale_mask = (
+                np.uint8((hsv[:, :, 1] < 100) & (hsv[:, :, 2] > 205)) * 255
+            )
+        else:
+            collision_board, collision_confidence, pale_mask = (
+                _detect_collision_frame(hsv)
+            )
         water_mask = cv2.inRange(
             hsv,
             np.array(self.config.water_hsv_low, dtype=np.uint8),
