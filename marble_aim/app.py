@@ -20,6 +20,7 @@ from .geometry import (
     Obstacle,
     Rect,
     Trajectory,
+    clamp_launch_elevation,
     estimate_ball_radius,
     search_recommendations,
     simulate_trajectory,
@@ -37,6 +38,7 @@ from .vision import (
     DetectionResult,
     MotionAimDetector,
     TemporalDetector,
+    _aim_line_from_cursor,
     render_debug,
 )
 
@@ -258,6 +260,23 @@ class ApplicationController(QObject):
             ball_radius,
         )
 
+    def _apply_cursor_aim(self, detection: DetectionResult) -> None:
+        """Keep arrow presence as state, but derive direction from dotted line + cursor."""
+        if detection.board is None or not detection.aim_marker_present:
+            detection.aim_line = None
+            return
+        fallback_origin = (
+            self.latest_scene.origin
+            if self.latest_scene is not None
+            else detection.launch_origin
+        )
+        detection.aim_line = _aim_line_from_cursor(
+            detection.board,
+            detection.aim_line,
+            self.capture.cursor_client_position(),
+            fallback_origin,
+        )
+
     def _scene_signature(self, scene: SceneSnapshot) -> tuple[object, ...]:
         return (
             round(scene.board.left / 3.0),
@@ -284,6 +303,7 @@ class ApplicationController(QObject):
 
     def _detect(self, frame: np.ndarray) -> None:
         detection = self.detector.detect(frame, debug_masks=self.debug_view)
+        self._apply_cursor_aim(detection)
         self.latest_detection = detection
         if detection.aim_line is None:
             self.round_candidate_signature = None
@@ -353,6 +373,7 @@ class ApplicationController(QObject):
     def _check_scene_transition(self, frame: np.ndarray) -> str:
         """Relock only for changed blocks plus a stable new aiming state."""
         detection = self.detector.detect(frame, debug_masks=self.debug_view)
+        self._apply_cursor_aim(detection)
         if detection.board is None or detection.aim_line is None:
             self.round_candidate_signature = None
             self.round_candidate_count = 0
@@ -471,7 +492,10 @@ class ApplicationController(QObject):
         fast_response: bool = False,
     ) -> None:
         lower, upper = line
-        candidate = unit(vec(*upper) - vec(*lower))
+        candidate = clamp_launch_elevation(
+            vec(*upper) - vec(*lower),
+            self.config.physics.minimum_launch_elevation_deg,
+        )
         if candidate[1] >= -0.05:
             return
         candidate_angle = math.atan2(float(candidate[1]), float(candidate[0]))
@@ -593,12 +617,14 @@ class ApplicationController(QObject):
     def _update_fast_aim(self, frame: np.ndarray) -> bool:
         if self.latest_scene is None:
             return False
+        cursor_position = self.capture.cursor_client_position()
         motion_line = self.motion_aim_detector.detect(
             frame,
             self.latest_scene.board,
             self.latest_scene.obstacles,
             self.latest_scene.origin,
             active=self.cursor_motion_frames > 0,
+            cursor_position=cursor_position,
         )
         if not self.motion_aim_detector.last_marker_present:
             self.aim_marker_missing_frames += 1
@@ -626,6 +652,7 @@ class ApplicationController(QObject):
             self.latest_scene.board,
             self.latest_scene.obstacles,
             self.latest_scene.origin,
+            cursor_position,
         )
         if line is None:
             self.aim_missing_frames += 1

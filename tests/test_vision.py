@@ -214,7 +214,7 @@ def test_cropped_frame_and_water_coloured_blocks_are_detected():
     assert result.aim_line is not None
 
 
-def test_shallow_aim_uses_arrow_axis_when_dotted_line_is_absent():
+def test_shallow_aim_uses_mouse_when_dotted_line_is_absent():
     image = synthetic_collision_scene()
     # Remove the synthetic dotted line while preserving the collision frame.
     water = hsv_to_bgr(100, 210, 235)
@@ -229,16 +229,22 @@ def test_shallow_aim_uses_arrow_axis_when_dotted_line_is_absent():
         arrow,
     )
 
-    result = BoardDetector(VisionConfig()).detect(image)
+    detector = BoardDetector(VisionConfig())
+    result = detector.detect(image)
 
-    assert result.aim_line is not None
-    lower, upper = result.aim_line
-    assert abs(lower[1] - result.board.bottom) <= 2
-    assert upper[0] > lower[0]
-    assert upper[1] < lower[1]
+    assert result.aim_marker_present
+    assert result.aim_line is None
+    line = detector.detect_aim_only(
+        image,
+        result.board,
+        result.obstacles,
+        launch_origin=(450.0, result.board.bottom),
+        cursor_position=(720.0, 540.0),
+    )
+    assert line == ((450.0, result.board.bottom), (720.0, 540.0))
 
 
-def test_current_arrow_overrides_stale_locked_launch_origin():
+def test_dotted_origin_and_mouse_direction_ignore_arrow_axis():
     image = synthetic_collision_scene()
     arrow = hsv_to_bgr(31, 35, 254)
     cv2.line(image, (445, 495), (500, 468), arrow, 16)
@@ -254,12 +260,13 @@ def test_current_arrow_overrides_stale_locked_launch_origin():
         board,
         [],
         launch_origin=(300.0, 500.0),
+        cursor_position=(700.0, 300.0),
     )
 
     assert line is not None
     lower, upper = line
     assert abs(lower[0] - 450.0) <= 8.0
-    assert upper[0] > lower[0]
+    assert upper == (700.0, 300.0)
 
 
 def test_thin_cream_decoration_is_not_mistaken_for_aim_arrow():
@@ -307,17 +314,31 @@ def test_motion_aim_detector_tracks_changed_current_dotted_line():
     board = Rect(250.0, 100.0, 650.0, 500.0)
     origin = (450.0, 500.0)
 
-    assert tracker.detect(first, board, [], origin, active=True) is None
-    line = tracker.detect(second, board, [], origin, active=True)
+    first_line = tracker.detect(
+        first,
+        board,
+        [],
+        origin,
+        active=True,
+        cursor_position=(720.0, 280.0),
+    )
+    line = tracker.detect(
+        second,
+        board,
+        [],
+        origin,
+        active=True,
+        cursor_position=(720.0, 280.0),
+    )
 
+    assert first_line == ((450.0, 500.0), (720.0, 280.0))
     assert line is not None
     lower, upper = line
     expected_bottom_x = start[0] + (board.bottom - start[1]) * (
         (end[0] - start[0]) / (end[1] - start[1])
     )
     assert abs(lower[0] - expected_bottom_x) <= 3
-    assert upper[0] > lower[0]
-    assert upper[1] < lower[1]
+    assert upper == (720.0, 280.0)
 
 
 def test_motion_aim_detector_rejects_moving_pale_line_without_arrow_marker():
@@ -329,6 +350,20 @@ def test_motion_aim_detector_rejects_moving_pale_line_without_arrow_marker():
     board = Rect(250.0, 100.0, 650.0, 500.0)
     origin = (450.0, 500.0)
 
-    assert tracker.detect(first, board, [], origin, active=True) is None
-    assert tracker.detect(second, board, [], origin, active=True) is None
+    assert tracker.detect(
+        first,
+        board,
+        [],
+        origin,
+        active=True,
+        cursor_position=(720.0, 280.0),
+    ) is None
+    assert tracker.detect(
+        second,
+        board,
+        [],
+        origin,
+        active=True,
+        cursor_position=(720.0, 280.0),
+    ) is None
     assert not tracker.last_marker_present

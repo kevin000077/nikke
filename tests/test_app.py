@@ -54,6 +54,7 @@ def test_new_aim_keeps_checking_same_blocks_for_clean_frames():
         obstacles=list(obstacles),
         launch_origin=scene.origin,
         aim_line=((300, 610), (500, 200)),
+        aim_marker_present=True,
     )
 
     class DetectorStub:
@@ -61,6 +62,11 @@ def test_new_aim_keeps_checking_same_blocks_for_clean_frames():
             return detection
 
     controller.detector = DetectorStub()
+    controller.capture = type(
+        "CaptureStub",
+        (),
+        {"cursor_client_position": lambda self: (500.0, 200.0)},
+    )()
     controller.debug_view = False
     controller.latest_scene = scene
     controller.locked_block_signature = controller._block_signature(scene)
@@ -74,3 +80,29 @@ def test_new_aim_keeps_checking_same_blocks_for_clean_frames():
     assert controller._check_scene_transition(None) == "pending"
     assert controller._check_scene_transition(None) == "pending"
     assert controller._check_scene_transition(None) == "same"
+
+
+def test_arrow_presence_gates_cursor_aim_without_contributing_direction():
+    controller = ApplicationController.__new__(ApplicationController)
+    controller.latest_scene = None
+    controller.capture = type(
+        "CaptureStub",
+        (),
+        {"cursor_client_position": lambda self: (700.0, 240.0)},
+    )()
+    board = Rect(100, 50, 520, 610)
+    detection = DetectionResult(
+        board=board,
+        obstacles=[],
+        launch_origin=(300.0, 610.0),
+        aim_line=((340.0, 610.0), (420.0, 200.0)),
+        aim_marker_present=False,
+    )
+
+    controller._apply_cursor_aim(detection)
+    assert detection.aim_line is None
+
+    detection.aim_marker_present = True
+    detection.aim_line = ((340.0, 610.0), (420.0, 200.0))
+    controller._apply_cursor_aim(detection)
+    assert detection.aim_line == ((340.0, 610.0), (700.0, 240.0))

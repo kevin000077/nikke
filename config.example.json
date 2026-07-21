@@ -8,6 +8,7 @@
     "max_distance_factor": 12.0,
     "reflection_bias_deg": 0.0,
     "collision_epsilon": 0.05,
+    "minimum_launch_elevation_deg": 17.1,
     "angle_min_deg": -80.0,
     "angle_max_deg": 80.0,
     "coarse_step_deg": 1.0,

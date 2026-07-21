@@ -15,6 +15,7 @@ class PhysicsConfig:
     max_distance_factor: float = 12.0
     reflection_bias_deg: float = 0.0
     collision_epsilon: float = 0.05
+    minimum_launch_elevation_deg: float = 17.1
     angle_min_deg: float = -80.0
     angle_max_deg: float = 80.0
     coarse_step_deg: float = 1.0

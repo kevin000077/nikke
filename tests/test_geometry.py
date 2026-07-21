@@ -7,6 +7,7 @@ import numpy as np
 from marble_aim.geometry import (
     Obstacle,
     Rect,
+    clamp_launch_elevation,
     direction_from_angle,
     estimate_ball_radius,
     ray_rounded_rect,
@@ -16,6 +17,26 @@ from marble_aim.geometry import (
     simulate_trajectory,
     vec,
 )
+
+
+def test_launch_direction_clamps_to_measured_minimum_elevation_on_both_sides():
+    minimum = 17.1
+    right = clamp_launch_elevation(vec(100, -1), minimum)
+    left = clamp_launch_elevation(vec(-100, 5), minimum)
+
+    right_elevation = math.degrees(math.atan2(-right[1], abs(right[0])))
+    left_elevation = math.degrees(math.atan2(-left[1], abs(left[0])))
+    assert math.isclose(right_elevation, minimum, abs_tol=1e-9)
+    assert math.isclose(left_elevation, minimum, abs_tol=1e-9)
+    assert right[0] > 0
+    assert left[0] < 0
+
+
+def test_launch_direction_keeps_steeper_angle_unchanged():
+    original = vec(1, -1)
+    clamped = clamp_launch_elevation(original, 17.1)
+
+    assert np.allclose(clamped, original / np.linalg.norm(original))
 
 
 def test_reflect_from_vertical_wall():

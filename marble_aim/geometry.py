@@ -21,6 +21,23 @@ def unit(value: Vec) -> Vec:
     return value / length
 
 
+def clamp_launch_elevation(
+    direction: Vec,
+    minimum_elevation_deg: float,
+) -> Vec:
+    """Clamp a launch direction to the game's minimum angle above horizontal."""
+    normalized = unit(direction)
+    minimum = math.radians(float(np.clip(minimum_elevation_deg, 0.0, 89.9)))
+    elevation = math.atan2(-float(normalized[1]), abs(float(normalized[0])))
+    if elevation >= minimum:
+        return normalized
+    horizontal_sign = -1.0 if normalized[0] < 0 else 1.0
+    return vec(
+        horizontal_sign * math.cos(minimum),
+        -math.sin(minimum),
+    )
+
+
 def estimate_ball_radius(
     board: "Rect",
     obstacles: Iterable["Obstacle"],

@@ -25,6 +25,7 @@ class DetectionResult:
     confidence: float = 0.0
     collision_frame_detected: bool = False
     aim_radius: float | None = None
+    aim_marker_present: bool = False
 
 
 def _largest_contour(mask: Image) -> tuple[NDArray[np.int32] | None, float]:
@@ -456,7 +457,7 @@ def _detect_aim_line(
         launch_hint or (float(board.center[0]), board.bottom),
         dtype=np.float64,
     )
-    anchor_limit = board.width * (0.12 if launch_hint is not None else 0.25)
+    anchor_limit = board.width * (0.12 if launch_hint is not None else 0.52)
     candidates: list[
         tuple[
             float,
@@ -532,6 +533,32 @@ def _detect_aim_line(
             if refined is not None and abs(refined[0][1] - board.bottom) <= 2.0:
                 return refined
     return best
+
+
+def _aim_line_from_cursor(
+    board: Rect,
+    dotted_line: tuple[tuple[float, float], tuple[float, float]] | None,
+    cursor_position: tuple[float, float] | None,
+    fallback_origin: tuple[float, float] | None,
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """Use the dotted line for launch X and the unrestricted cursor for angle."""
+    if cursor_position is None:
+        return dotted_line
+    cursor_x, cursor_y = (float(value) for value in cursor_position)
+    if not (math.isfinite(cursor_x) and math.isfinite(cursor_y)):
+        return dotted_line
+    if dotted_line is not None:
+        origin_x = float(dotted_line[0][0])
+    elif fallback_origin is not None:
+        origin_x = float(fallback_origin[0])
+    else:
+        origin_x = float(board.center[0])
+    # Intentionally do not clamp cursor_x. At shallow angles the real cursor
+    # can sit beyond either side of the collision frame.
+    return (
+        (origin_x, float(board.bottom)),
+        (cursor_x, cursor_y),
+    )
 
 
 def _detect_aim_reticle_radius(
@@ -740,19 +767,22 @@ class BoardDetector:
         board: Rect,
         obstacles: list[Obstacle] | tuple[Obstacle, ...],
         launch_origin: tuple[float, float] | None = None,
+        cursor_position: tuple[float, float] | None = None,
     ) -> tuple[tuple[float, float], tuple[float, float]] | None:
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
         pale = np.uint8((hsv[:, :, 1] < 100) & (hsv[:, :, 2] > 205)) * 255
-        arrow_line = _detect_arrow_axis(hsv, board)
-        # The visible arrow belongs to the current frame and therefore wins
-        # over a launch point cached when the scene was locked.
-        launch_hint = arrow_line[0] if arrow_line is not None else launch_origin
-        return _detect_aim_line(
+        dotted_line = _detect_aim_line(
             pale,
             board,
             list(obstacles),
-            launch_hint,
-        ) or arrow_line
+            None,
+        )
+        return _aim_line_from_cursor(
+            board,
+            dotted_line,
+            cursor_position,
+            launch_origin,
+        )
 
     def detect(self, bgr: Image, *, debug_masks: bool = False) -> DetectionResult:
         hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
@@ -869,15 +899,16 @@ class BoardDetector:
             )
         aim_line = None
         aim_radius = None
+        aim_marker_present = False
         if board is not None and collision_board is not None:
             arrow_line = _detect_arrow_axis(hsv, board)
-            launch_hint = arrow_line[0] if arrow_line is not None else None
+            aim_marker_present = arrow_line is not None
             aim_line = _detect_aim_line(
                 pale_mask,
                 board,
                 obstacles,
-                launch_hint,
-            ) or arrow_line
+                None,
+            )
             aim_radius = _detect_aim_reticle_radius(
                 bgr,
                 hsv,
@@ -909,6 +940,7 @@ class BoardDetector:
             confidence=float(overall),
             collision_frame_detected=collision_board is not None,
             aim_radius=aim_radius,
+            aim_marker_present=aim_marker_present,
         )
 
 
@@ -919,11 +951,13 @@ class MotionAimDetector:
         self.previous_gray: Image | None = None
         self.previous_geometry: tuple[int, int, int, int] | None = None
         self.last_marker_present = False
+        self.last_origin_x: float | None = None
 
     def reset(self) -> None:
         self.previous_gray = None
         self.previous_geometry = None
         self.last_marker_present = False
+        self.last_origin_x = None
 
     def detect(
         self,
@@ -933,6 +967,7 @@ class MotionAimDetector:
         launch_origin: tuple[float, float],
         *,
         active: bool,
+        cursor_position: tuple[float, float] | None = None,
     ) -> tuple[tuple[float, float], tuple[float, float]] | None:
         height, width = bgr.shape[:2]
         x0 = max(0, math.floor(board.left - board.width * 0.03))
@@ -963,59 +998,64 @@ class MotionAimDetector:
         hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
         arrow_line = _detect_arrow_axis(hsv, local_board)
         self.last_marker_present = arrow_line is not None
-        if not self.last_marker_present or not active or previous is None:
+        if not self.last_marker_present:
             return None
 
-        difference = cv2.absdiff(gray, previous)
-        motion = np.uint8(difference >= 10) * 255
-        motion_kernel_size = max(3, round(board.width * 0.017))
-        if motion_kernel_size % 2 == 0:
-            motion_kernel_size += 1
-        motion = cv2.dilate(
-            motion,
-            cv2.getStructuringElement(
-                cv2.MORPH_ELLIPSE,
-                (motion_kernel_size, motion_kernel_size),
-            ),
-            iterations=1,
-        )
-        pale = np.uint8((hsv[:, :, 1] < 110) & (hsv[:, :, 2] > 200)) * 255
-        source = cv2.bitwise_and(pale, motion)
-        minimum_motion_pixels = max(20, round(board.width * board.width * 0.00017))
-        if cv2.countNonZero(source) < minimum_motion_pixels:
-            return None
-
-        local_obstacles = [
-            Obstacle(
-                Rect(
-                    item.rect.left - x0,
-                    item.rect.top - y0,
-                    item.rect.right - x0,
-                    item.rect.bottom - y0,
+        dotted_line = None
+        if active and previous is not None:
+            difference = cv2.absdiff(gray, previous)
+            motion = np.uint8(difference >= 10) * 255
+            motion_kernel_size = max(3, round(board.width * 0.017))
+            if motion_kernel_size % 2 == 0:
+                motion_kernel_size += 1
+            motion = cv2.dilate(
+                motion,
+                cv2.getStructuringElement(
+                    cv2.MORPH_ELLIPSE,
+                    (motion_kernel_size, motion_kernel_size),
                 ),
-                item.corner_radius,
-                item.confidence,
-                item.identifier,
+                iterations=1,
             )
-            for item in obstacles
-        ]
-        local_origin = (
-            arrow_line[0]
-            if arrow_line is not None
-            else (launch_origin[0] - x0, launch_origin[1] - y0)
-        )
-        line = _detect_aim_line(
-            source,
-            local_board,
-            local_obstacles,
-            local_origin,
-        )
-        if line is None:
-            return None
-        lower, upper = line
-        return (
-            (lower[0] + x0, lower[1] + y0),
-            (upper[0] + x0, upper[1] + y0),
+            pale = np.uint8((hsv[:, :, 1] < 110) & (hsv[:, :, 2] > 200)) * 255
+            source = cv2.bitwise_and(pale, motion)
+            minimum_motion_pixels = max(
+                20,
+                round(board.width * board.width * 0.00017),
+            )
+            if cv2.countNonZero(source) >= minimum_motion_pixels:
+                local_obstacles = [
+                    Obstacle(
+                        Rect(
+                            item.rect.left - x0,
+                            item.rect.top - y0,
+                            item.rect.right - x0,
+                            item.rect.bottom - y0,
+                        ),
+                        item.corner_radius,
+                        item.confidence,
+                        item.identifier,
+                    )
+                    for item in obstacles
+                ]
+                local_line = _detect_aim_line(
+                    source,
+                    local_board,
+                    local_obstacles,
+                    None,
+                )
+                if local_line is not None:
+                    dotted_line = (
+                        (local_line[0][0] + x0, local_line[0][1] + y0),
+                        (local_line[1][0] + x0, local_line[1][1] + y0),
+                    )
+                    self.last_origin_x = float(dotted_line[0][0])
+        if self.last_origin_x is None:
+            self.last_origin_x = float(launch_origin[0])
+        return _aim_line_from_cursor(
+            board,
+            dotted_line,
+            cursor_position,
+            (self.last_origin_x, board.bottom),
         )
 
 
@@ -1095,6 +1135,7 @@ class TemporalDetector:
                 if any(item.aim_radius is not None for item in self.history)
                 else current.aim_radius
             ),
+            aim_marker_present=current.aim_marker_present,
         )
 
 
